@@ -1,7 +1,11 @@
-import pickle
 import streamlit as st
+import pandas as pd
 import requests
 import os
+import ast
+
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
 # ---------------- PAGE CONFIG ----------------
 st.set_page_config(
@@ -10,11 +14,9 @@ st.set_page_config(
     layout="wide"
 )
 
-# ---------------- BACKGROUND + ADVANCED CSS ----------------
+# ---------------- BACKGROUND + CSS ----------------
 st.markdown("""
 <style>
-
-/* Background */
 .stApp {
     background: linear-gradient(rgba(0,0,0,0.75), rgba(0,0,0,0.95)),
     url("https://images.unsplash.com/photo-1524985069026-dd778a71c7b4");
@@ -22,18 +24,14 @@ st.markdown("""
     background-position: center;
 }
 
-/* Title */
 .title {
     font-size:50px;
     font-weight:800;
     text-align:center;
     color:#ff4b4b;
-    margin-top:10px;
     margin-bottom:25px;
-    letter-spacing:1px;
 }
 
-/* Subtitle */
 .subtitle {
     text-align:center;
     font-size:18px;
@@ -41,7 +39,6 @@ st.markdown("""
     margin-bottom:30px;
 }
 
-/* Glass card */
 .movie-card {
     background: rgba(255,255,255,0.05);
     backdrop-filter: blur(10px);
@@ -52,54 +49,61 @@ st.markdown("""
     box-shadow: 0 4px 30px rgba(0,0,0,0.4);
 }
 
-/* Hover Animation */
 .movie-card:hover {
-    transform: scale(1.08) translateY(-5px);
+    transform: scale(1.08);
     box-shadow: 0 8px 40px rgba(255,0,0,0.5);
 }
 
-/* Poster image */
-.poster {
-    border-radius:12px;
-}
-
-/* Button style */
-.stButton>button {
-    background: linear-gradient(90deg,#ff4b4b,#ff7a18);
-    color:white;
-    border:none;
-    border-radius:8px;
-    padding:10px 25px;
-    font-size:16px;
-    font-weight:600;
-    transition: 0.3s;
-}
-.stButton>button:hover {
-    transform: scale(1.05);
-    background: linear-gradient(90deg,#ff7a18,#ff4b4b);
-}
-
-/* Footer */
 .footer {
     text-align:center;
     margin-top:40px;
     color:#aaa;
     font-size:14px;
 }
-
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- LOAD DATA ----------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# ---------------- LOAD & TRAIN MODEL ----------------
+@st.cache_data
+def load_model():
+    movies = pd.read_csv("tmdb_5000_movies.csv")
+    credits = pd.read_csv("tmdb_5000_credits.csv")
 
-movies = pickle.load(open(os.path.join(BASE_DIR, 'movie_list.pkl'), 'rb'))
-similarity = pickle.load(open(os.path.join(BASE_DIR, 'similarity.pkl'), 'rb'))
+    movies = movies.merge(credits, on='title')
+    movies = movies[['movie_id','title','overview','genres','keywords','cast','crew']]
+    movies.dropna(inplace=True)
 
-# ---------------- OMDb API FUNCTION ----------------
+    def convert(text):
+        return [i['name'] for i in ast.literal_eval(text)]
+
+    def fetch_director(text):
+        for i in ast.literal_eval(text):
+            if i['job'] == 'Director':
+                return i['name']
+        return ""
+
+    movies['genres'] = movies['genres'].apply(convert)
+    movies['keywords'] = movies['keywords'].apply(convert)
+    movies['cast'] = movies['cast'].apply(convert)
+    movies['crew'] = movies['crew'].apply(fetch_director)
+
+    movies['overview'] = movies['overview'].apply(lambda x: x.split())
+
+    movies['tags'] = movies['overview'] + movies['genres'] + movies['keywords'] + movies['cast']
+    movies['tags'] = movies['tags'].apply(lambda x: " ".join(x))
+
+    cv = CountVectorizer(max_features=5000, stop_words='english')
+    vectors = cv.fit_transform(movies['tags']).toarray()
+    similarity = cosine_similarity(vectors)
+
+    return movies, similarity
+
+movies, similarity = load_model()
+
+# ---------------- OMDb POSTER ----------------
 API_KEY = "76e2af90"
 
-@st.cache_data(show_spinner=False)
+@st.cache_data
 def get_movie_details(title):
     try:
         url = f"http://www.omdbapi.com/?t={title}&apikey={API_KEY}"
@@ -110,10 +114,9 @@ def get_movie_details(title):
         rating = data.get("imdbRating")
 
         if not poster or poster == "N/A":
-            poster = f"https://via.placeholder.com/500x750?text={title.replace(' ','+')}"
+            poster = f"https://via.placeholder.com/500x750?text={title}"
 
         return poster, year, rating
-
     except:
         return f"https://via.placeholder.com/500x750?text={title}", "-", "-"
 
@@ -138,35 +141,23 @@ def recommend(movie):
 
     return names, posters, years, ratings
 
-# ---------------- HEADER ----------------
-st.markdown("<div class='title'>🎬 AI Movie Recommender System</div>", unsafe_allow_html=True)
-st.markdown("<div class='subtitle'>Discover movies you’ll love using AI recommendations</div>", unsafe_allow_html=True)
+# ---------------- UI ----------------
+st.markdown("<div class='title'>🎬 AI Movie Recommender</div>", unsafe_allow_html=True)
+st.markdown("<div class='subtitle'>Discover movies you’ll love using AI</div>", unsafe_allow_html=True)
 
-# ---------------- SEARCH ----------------
-movie_list = movies['title'].values
+selected_movie = st.selectbox("🔍 Select Movie", movies['title'].values)
 
-selected_movie = st.selectbox("🔍 Search or select a movie", movie_list)
-
-# ---------------- BUTTON ----------------
 if st.button("🚀 Show Recommendations"):
-
     names, posters, years, ratings = recommend(selected_movie)
 
-    st.markdown("## ⭐ Recommended Movies")
-
     cols = st.columns(5)
-
     for i in range(5):
         with cols[i]:
             st.markdown("<div class='movie-card'>", unsafe_allow_html=True)
             st.image(posters[i], use_container_width=True)
             st.markdown(f"**{names[i]}**")
-            st.caption(f"📅 {years[i]}  |  ⭐ {ratings[i]}")
+            st.caption(f"📅 {years[i]} | ⭐ {ratings[i]}")
             st.markdown("</div>", unsafe_allow_html=True)
 
-# ---------------- FOOTER ----------------
 st.markdown("---")
-st.markdown(
-    "<div class='footer'>Made with ❤️ by Bhuvan Gowda H K | AI + ML Movie Recommender</div>",
-    unsafe_allow_html=True
-)
+st.markdown("<div class='footer'>Made with ❤️ by Bhuvan Gowda H K</div>", unsafe_allow_html=True)
