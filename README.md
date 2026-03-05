@@ -20,7 +20,7 @@ This is a **content-based movie recommendation system** that suggests movies sim
 It uses:
 - 🧠 NLP (Bag of Words)
 - 📊 Cosine Similarity
-- 🎬 Movie metadata (genre, overview, cast, keywords)
+- 🎬 Movie metadata (genre, overview, keywords)
 
 to generate **highly relevant recommendations instantly**.
 
