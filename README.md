@@ -36,10 +36,7 @@ to generate **highly relevant recommendations instantly**.
 
 ---
 
-## 🖥️ Preview
 
-| Home Page | Recommendations |
-|----------|----------------|
 | ![](assets/home.png) | ![](assets/recommendations.png) |
 
 ---
